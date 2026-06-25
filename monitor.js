@@ -20,6 +20,8 @@ const EMAIL_TO = process.env.EMAIL_TO;
 const EMAIL_SUBJECT =
   process.env.EMAIL_SUBJECT || "Cron Curl Monitor: Failures Detected";
 const LOG_FILE = process.env.LOG_FILE || "/var/log/curl_monitor.log";
+const HEARTBEAT_FILE = "/tmp/monitor_heartbeat.json";
+const MAX_CONSECUTIVE_ERRORS = parseInt(process.env.MAX_CONSECUTIVE_ERRORS || "5", 10);
 
 /**
  * Append a timestamped log line to the log file.
@@ -53,6 +55,39 @@ function runCurl(command) {
       });
     });
   });
+}
+
+/**
+ * Read the current heartbeat data.
+ */
+function readHeartbeat() {
+  try {
+    if (!fs.existsSync(HEARTBEAT_FILE)) {
+      return { consecutive_errors: 0, total_runs: 0, last_email_status: "unknown" };
+    }
+    const data = fs.readFileSync(HEARTBEAT_FILE, "utf8");
+    return JSON.parse(data);
+  } catch (err) {
+    log(`Failed to read heartbeat file: ${err.message}`);
+    return { consecutive_errors: 0, total_runs: 0, last_email_status: "unknown" };
+  }
+}
+
+/**
+ * Write heartbeat data to the heartbeat file.
+ */
+function writeHeartbeat(consecutiveErrors, totalRuns, lastEmailStatus) {
+  try {
+    const data = {
+      last_run: new Date().toISOString(),
+      consecutive_errors: consecutiveErrors,
+      total_runs: totalRuns,
+      last_email_status: lastEmailStatus,
+    };
+    fs.writeFileSync(HEARTBEAT_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    log(`Failed to write heartbeat file: ${err.message}`);
+  }
 }
 
 /**
@@ -93,9 +128,11 @@ async function sendEmail(errors) {
   try {
     await transporter.sendMail(mailOptions);
     log(`Email sent successfully to ${EMAIL_TO}`);
+    return "success";
   } catch (err) {
     log(`Failed to send email: ${err.message}`);
     process.stderr.write(`Failed to send email: ${err.message}\n`);
+    return "failed";
   }
 }
 
@@ -105,8 +142,15 @@ async function sendEmail(errors) {
 async function main() {
   log("Monitor started");
 
+  // Read previous heartbeat state
+  const heartbeat = readHeartbeat();
+  let consecutiveErrors = heartbeat.consecutive_errors || 0;
+  let totalRuns = (heartbeat.total_runs || 0) + 1;
+  let lastEmailStatus = heartbeat.last_email_status || "unknown";
+
   if (CURL_COMMANDS.length === 0) {
     log("No curl commands configured. Exiting.");
+    writeHeartbeat(consecutiveErrors, totalRuns, lastEmailStatus);
     return;
   }
 
@@ -133,11 +177,16 @@ async function main() {
   }
 
   if (errors.length > 0) {
-    log(`Monitor finished with ${errors.length} error(s). Sending email.`);
-    await sendEmail(errors);
+    consecutiveErrors++;
+    log(`Monitor finished with ${errors.length} error(s). Consecutive error count: ${consecutiveErrors}`);
+    lastEmailStatus = await sendEmail(errors);
   } else {
     log("Monitor finished. All checks passed.");
+    consecutiveErrors = 0;
   }
+
+  // Write heartbeat for health checker
+  writeHeartbeat(consecutiveErrors, totalRuns, lastEmailStatus);
 }
 
 main().catch((err) => {
