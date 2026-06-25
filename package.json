@@ -1,0 +1,13 @@
+{
+  "name": "mail_checker",
+  "version": "1.0.0",
+  "description": "Curl monitoring script with email alerts",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "nodemailer": "^6.9.7"
+  }
+}

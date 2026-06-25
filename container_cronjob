@@ -1,0 +1,2 @@
+0 0 0,6,12,18 * * * root /cron_script.sh
+
