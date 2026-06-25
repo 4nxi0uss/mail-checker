@@ -15,14 +15,19 @@ ENV TZ=Europe/Warsaw
 COPY ./package.json /package.json
 RUN npm install
 
-# Copy script and cron job
+# Copy scripts and cron job
 COPY ./container_cronjob /etc/cron.d/container_cronjob
 COPY ./cron_script.sh /cron_script.sh
 COPY ./monitor.js /monitor.js
+COPY ./healthcheck.js /healthcheck.js
 
 # Set permissions
 RUN chmod +x /cron_script.sh
 RUN chmod 0644 /etc/cron.d/container_cronjob
+
+# Health check: verify monitor is running correctly
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node /healthcheck.js || exit 1
 
 # Start cron in foreground & keep container alive
 CMD ["cron", "-f"]
